@@ -81,7 +81,7 @@ func locate(target string) (pid int, filter string, err error) {
 // Status reports whether the target can be driven right now (cheap; no UI).
 func Status(target string) (bool, string) {
 	if !HasPermission(false) {
-		return false, "needs Accessibility permission (click Grant access)"
+		return false, "needs Accessibility permission (if it already looks switched on, remove the entry with – and add the app again)"
 	}
 	if _, _, err := locate(target); err != nil {
 		return false, err.Error()

@@ -233,7 +233,9 @@ func (s *server) action(w http.ResponseWriter, r *http.Request) {
 	case "apply":
 		s.eng.ForceApply()
 	case "grant":
-		teams.HasPermission(true)
+		if !teams.HasPermission(true) {
+			err = openAccessibilitySettings()
+		}
 		s.eng.ForceApply()
 	case "keepAwake":
 		err = s.eng.SetKeepAwake(req.Mode)

@@ -40,6 +40,22 @@ function h(tag, props = {}, ...children) {
   return el;
 }
 
+// ---- in-app dialogs ---------------------------------------------------------
+// The app's webview (WKWebView / WebView2 via Wails) doesn't implement the
+// browser's confirm()/alert() popups, so use our own <dialog>.
+
+function ask(message, okLabel = "OK", showCancel = true) {
+  const dlg = $("#dlg-ask");
+  text($("#ask-text"), message);
+  text($("#ask-ok"), okLabel);
+  $("#ask-cancel").hidden = !showCancel;
+  dlg.returnValue = "";
+  dlg.showModal();
+  return new Promise((resolve) => dlg.addEventListener("close", () => resolve(dlg.returnValue === "ok"), { once: true }));
+}
+
+function tell(message) { return ask(message, "OK", false); }
+
 // ---- status -----------------------------------------------------------------
 
 function renderStatus() {
@@ -101,7 +117,7 @@ function renderSchedules() {
     dup.addEventListener("click", () => openEditor({ ...structuredClone(s), id: "", name: `${s.name} (copy)`, enabled: false }));
     const del = h("button", { className: "link", textContent: "Delete" });
     del.addEventListener("click", async () => {
-      if (confirm(`Delete “${s.name}”?`)) { await api("/api/schedule/delete", { id: s.id }); refresh(); }
+      if (await ask(`Delete “${s.name}”?`, "Delete")) { await api("/api/schedule/delete", { id: s.id }); refresh(); }
     });
     const row = h("tr", {},
       h("td", {}, toggle),
@@ -193,7 +209,9 @@ matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => { dr
 function blockRow(b) {
   const tr = h("tr");
   DAY_NUM.forEach((d, idx) => {
-    tr.append(h("td", {}, h("input", { type: "checkbox", checked: b.days.includes(d), title: DAY_NAMES[idx], dataset: { day: d } })));
+    const box = h("input", { type: "checkbox", checked: b.days.includes(d), title: DAY_NAMES[idx] });
+    box.dataset.day = d; // dataset is read-only: set keys, don't assign the object
+    tr.append(h("td", {}, box));
   });
   tr.append(h("td", {}, h("input", { type: "time", value: b.start, required: true, className: "start" })));
   tr.append(h("td", {}, h("input", { type: "time", value: b.end, required: true, className: "end" })));
@@ -298,7 +316,7 @@ $("#form-settings").addEventListener("submit", async (e) => {
 });
 
 $("#btn-inspect").addEventListener("click", async () => {
-  if (!confirm("This opens your Teams profile and status menus to list the controls the app can see. Your status isn't changed. It can take up to a minute. Continue?")) return;
+  if (!(await ask("This opens your Teams profile and status menus to list the controls the app can see. Your status isn't changed. It can take up to a minute.", "Inspect"))) return;
   const btn = $("#btn-inspect");
   btn.disabled = true;
   text(btn, "Inspecting…");
@@ -308,14 +326,14 @@ $("#btn-inspect").addEventListener("click", async () => {
     text($("#inspect-text"), r.text);
     $("#dlg-inspect").showModal();
   } catch (err) {
-    alert(err.message);
+    tell(err.message);
   } finally {
     btn.disabled = false;
     text(btn, "Inspect Teams UI…");
   }
 });
-$("#btn-labels").addEventListener("click", () => api("/api/action", { action: "openLabels" }).catch((e) => alert(e.message)));
-$("#btn-folder").addEventListener("click", () => api("/api/action", { action: "openFolder" }).catch((e) => alert(e.message)));
+$("#btn-labels").addEventListener("click", () => api("/api/action", { action: "openLabels" }).catch((e) => tell(e.message)));
+$("#btn-folder").addEventListener("click", () => api("/api/action", { action: "openFolder" }).catch((e) => tell(e.message)));
 
 // ---- status actions -------------------------------------------------------------
 

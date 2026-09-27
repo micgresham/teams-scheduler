@@ -71,8 +71,12 @@ This is **fair use ware**: free to use. If you find it useful, see
      Accessibility needs an administrator's name and password. On a work
      Mac, ask IT to allow **Teams Status Scheduler**, or have them approve
      it for you.
-   - **You rebuild the app.** Each unsigned rebuild counts as a new app to
-     macOS. Remove the old entry with the "–" button and allow the new one.
+   - **You update or rebuild the app.** The app is ad-hoc signed, so macOS
+     treats each new build as a different app. The old "Teams Status
+     Scheduler" entry can still look switched on while the new build is
+     refused. Select the entry, remove it with the **–** button, and click
+     **Grant access…** again (or add the app with **+**). Quit and reopen
+     the app if the status doesn't update.
    - **Your Mac is managed by your company (MDM).** IT policy may block
      Accessibility access for apps it hasn't approved.
 

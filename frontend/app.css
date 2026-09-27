@@ -92,6 +92,7 @@ dialog {
   border: 1px solid var(--border); border-radius: 12px; background: var(--card); color: var(--text);
   padding: 18px 20px; width: min(860px, calc(100vw - 32px)); max-height: calc(100vh - 32px);
 }
+dialog.small-dialog { width: min(440px, calc(100vw - 32px)); }
 dialog::backdrop { background: rgb(0 0 0 / 0.35); }
 dialog h2 { margin-bottom: 12px; font-size: 17px; }
 .form-grid { display: grid; grid-template-columns: 1fr 160px auto; gap: 12px; align-items: end; }
