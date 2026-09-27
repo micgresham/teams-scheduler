@@ -9,6 +9,9 @@ changes your status by operating the Teams status menu, the same way you
 would: profile picture → *"Available, change status"* → *Busy*. It uses the
 operating system's accessibility interface to do this.
 
+This is **fair use ware**: free to use. If you find it useful, see
+[Fair use ware](#fair-use-ware).
+
 ## Features
 
 - **Multiple schedules at once, with priorities.** Priority **1 is the
@@ -202,3 +205,10 @@ makebin.sh               builds all four targets
   build has been tested end to end against new Teams (2026).
 - **Schedules use the computer's local time zone.** A block from 00:00 to
   00:00 covers the full day.
+
+## Fair use ware
+
+Teams Status Scheduler is **fair use ware**: you're free to use it. If you
+find it useful, buy me a cup of coffee at **Starbucks** or **7 Brew** and
+send it to my email, **micgresham@gmail.com**. You can send a gift card or
+an e-gift through the Starbucks or 7 Brew app. ☕
