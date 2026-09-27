@@ -108,6 +108,9 @@ fieldset.dates { display: flex; gap: 16px; }
 .blocks select { max-width: 170px; }
 .dialog-actions { display: flex; justify-content: flex-end; align-items: center; gap: 8px; margin-top: 14px; }
 .dialog-actions .muted { margin-right: auto; }
+.graph-fields { display: grid; gap: 8px; margin: 4px 0 6px 24px; }
+.graph-fields[hidden] { display: none; }
+.graph-account { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .row-buttons { display: flex; gap: 8px; flex-wrap: wrap; }
 pre {
   background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 10px;

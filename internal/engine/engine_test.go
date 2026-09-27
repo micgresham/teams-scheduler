@@ -13,14 +13,18 @@ import (
 )
 
 type fakeAuto struct {
-	mu    sync.Mutex
-	calls []string
-	fail  error
+	mu        sync.Mutex
+	calls     []string
+	fail      error
+	refresh   time.Duration
+	lastUntil time.Time
 }
 
-func (f *fakeAuto) Status(string) (bool, string)   { return true, "fake" }
-func (f *fakeAuto) Inspect(string) (string, error) { return "", nil }
-func (f *fakeAuto) Apply(_ string, p *schedule.Presence) (string, error) {
+func (f *fakeAuto) Status(string) (bool, string)      { return true, "fake" }
+func (f *fakeAuto) Inspect(string) (string, error)    { return "", nil }
+func (f *fakeAuto) RefreshEvery(string) time.Duration { return f.refresh }
+func (f *fakeAuto) Apply(_ string, p *schedule.Presence, until time.Time) (string, error) {
+	f.lastUntil = until
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if p == nil {
@@ -132,5 +136,28 @@ func TestFailureBacksOff(t *testing.T) {
 	settle(e)
 	if got := f.get(); len(got) != 2 || e.Snapshot().Applied != "Busy" {
 		t.Errorf("force apply: calls %v applied %q", got, e.Snapshot().Applied)
+	}
+}
+
+func TestGraphStyleRefreshAndExpiry(t *testing.T) {
+	e, f := setup(t, []schedule.Schedule{allDay(schedule.Busy)}, config.AwakeOff)
+	f.refresh = time.Hour
+	settle(e)
+	settle(e)
+	if got := f.get(); len(got) != 1 {
+		t.Fatalf("should not re-send within the refresh interval: %v", got)
+	}
+	// Expiry: end of today's all-day block plus the buffer.
+	y, m, d := time.Now().Date()
+	want := time.Date(y, m, d+1, 0, 0, 0, 0, time.Local).Add(expiryBuffer)
+	if !f.lastUntil.Equal(want) {
+		t.Errorf("until = %v, want %v", f.lastUntil, want)
+	}
+	e.mu.Lock()
+	e.appliedAt = time.Now().Add(-2 * time.Hour)
+	e.mu.Unlock()
+	settle(e)
+	if got := f.get(); len(got) != 2 {
+		t.Errorf("should re-send after the refresh interval: %v", got)
 	}
 }

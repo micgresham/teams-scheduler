@@ -63,7 +63,8 @@ function renderStatus() {
   const target = $("#st-target");
   target.className = st.ready ? "" : "warn";
   text(target, (st.ready ? "✓ " : "⚠ ") + (st.info || "…"));
-  $("#btn-grant").hidden = !(state.platform === "darwin" && /permission/i.test(st.info || ""));
+  $("#btn-grant").hidden = !(st.target !== "graph" && state.platform === "darwin" && /permission/i.test(st.info || ""));
+  $("#btn-signin").hidden = !(st.target === "graph" && !st.ready && !state.graph.signingIn && state.settings.graphClientId);
 
   const cur = st.current;
   $("#st-dot").style.background = cur ? colorFor(cur.presence) : cssVar("--none");
@@ -273,10 +274,72 @@ $("#form-schedule").addEventListener("submit", async (e) => {
 
 // ---- settings -----------------------------------------------------------------
 
+function renderGraphSettings() {
+  const f = $("#form-settings");
+  $("#graph-fields").hidden = f.target.value !== "graph";
+  $("#perm-note").hidden = f.target.value === "graph";
+  const g = state.graph || {};
+  const acct = $("#graph-account");
+  acct.className = g.error && !g.signedInAs ? "warn" : "muted";
+  text(acct, g.signingIn ? "Finish signing in in your browser…"
+    : g.signedInAs ? `Signed in as ${g.signedInAs}`
+    : g.error ? g.error : "Not signed in");
+  $("#btn-graph-signout").hidden = !g.signedInAs;
+  $("#btn-graph-signin").hidden = !!g.signedInAs || g.signingIn;
+}
+
+function settingsFromForm() {
+  const f = $("#form-settings");
+  return {
+    ...state.settings,
+    target: f.target.value,
+    graphClientId: f.graphClientId.value.trim(),
+    graphTenant: f.graphTenant.value.trim(),
+    checkIntervalSeconds: Number(f.checkIntervalSeconds.value),
+    resetOnExit: f.resetOnExit.checked,
+    startHidden: f.startHidden.checked,
+    launchAtLogin: f.launchAtLogin.checked,
+    keepAwake: f.keepAwake.value,
+    keepDisplayAwake: f.keepDisplayAwake.checked,
+  };
+}
+
+function settingsError(msg) {
+  const el = $("#settings-error");
+  el.textContent = msg;
+  el.hidden = !msg;
+}
+
+$("#form-settings").addEventListener("change", (e) => { if (e.target.name === "target") renderGraphSettings(); });
+
+$("#btn-graph-signin").addEventListener("click", async () => {
+  try {
+    await api("/api/settings", { ...settingsFromForm(), target: "graph" });
+    $("#form-settings").target.value = "graph";
+    await api("/api/action", { action: "graphSignIn" });
+    settingsError("");
+    await refresh();
+    renderGraphSettings();
+  } catch (err) {
+    settingsError(err.message);
+  }
+});
+
+$("#btn-graph-signout").addEventListener("click", async () => {
+  if (!(await ask("Sign out of Microsoft? Your Teams status goes back to automatic.", "Sign out"))) return;
+  await api("/api/action", { action: "graphSignOut" });
+  await refresh();
+  renderGraphSettings();
+});
+
+$("#btn-signin").addEventListener("click", () => api("/api/action", { action: "graphSignIn" }).then(refresh).catch((e) => tell(e.message)));
+
 $("#btn-settings").addEventListener("click", () => {
   const f = $("#form-settings");
   const s = state.settings;
   f.target.value = s.target;
+  f.graphClientId.value = s.graphClientId || "";
+  f.graphTenant.value = s.graphTenant || "organizations";
   f.checkIntervalSeconds.value = s.checkIntervalSeconds;
   f.resetOnExit.checked = s.resetOnExit;
   f.startHidden.checked = s.startHidden;
@@ -287,31 +350,20 @@ $("#btn-settings").addEventListener("click", () => {
     ? "macOS: allow “Teams Status Scheduler” under System Settings → Privacy & Security → Accessibility."
     : "");
   text($("#version"), `Version ${state.version}`);
-  $("#settings-error").hidden = true;
+  settingsError("");
+  renderGraphSettings();
   $("#dlg-settings").showModal();
 });
 
 $("#form-settings").addEventListener("submit", async (e) => {
   if (e.submitter?.value !== "save") return;
   e.preventDefault();
-  const f = e.target;
   try {
-    await api("/api/settings", {
-      ...state.settings,
-      target: f.target.value,
-      checkIntervalSeconds: Number(f.checkIntervalSeconds.value),
-      resetOnExit: f.resetOnExit.checked,
-      startHidden: f.startHidden.checked,
-      launchAtLogin: f.launchAtLogin.checked,
-      keepAwake: f.keepAwake.value,
-      keepDisplayAwake: f.keepDisplayAwake.checked,
-    });
+    await api("/api/settings", settingsFromForm());
     $("#dlg-settings").close();
     refresh();
   } catch (err) {
-    const el = $("#settings-error");
-    el.textContent = err.message;
-    el.hidden = false;
+    settingsError(err.message);
   }
 });
 
@@ -352,6 +404,7 @@ async function refresh() {
     return;
   }
   renderStatus();
+  if ($("#dlg-settings").open) renderGraphSettings();
   const sig = JSON.stringify(state.schedules);
   if (sig !== lastSchedules || !preview) {
     lastSchedules = sig;

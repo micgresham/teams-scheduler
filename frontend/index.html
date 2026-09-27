@@ -17,7 +17,7 @@
     </div>
     <dl class="status-grid">
       <dt>Teams</dt>
-      <dd><span id="st-target"></span> <button id="btn-grant" class="small" hidden>Grant access…</button></dd>
+      <dd><span id="st-target"></span> <button id="btn-grant" class="small" hidden>Grant access…</button> <button id="btn-signin" class="small" hidden>Sign in…</button></dd>
       <dt>Scheduled now</dt>
       <dd><span id="st-dot" class="dot"></span><span id="st-current"></span></dd>
       <dt>Next change</dt>
@@ -104,6 +104,18 @@
         <small>The new Teams app must be running and signed in. It can be minimised, hidden or have its window closed.</small></label>
       <label class="radio"><input type="radio" name="target" value="browser"> Teams web in a browser
         <small>Keep teams.microsoft.com open as the active tab of a browser window (Chrome, Edge, Safari, Firefox, …).</small></label>
+      <label class="radio"><input type="radio" name="target" value="graph"> Microsoft Graph (Entra ID app registration)
+        <small>Uses the official API, with no clicking and no Accessibility permission. Needs an app registration in your organisation's Entra ID (see README).</small></label>
+      <div id="graph-fields" class="graph-fields">
+        <label>Application (client) ID <input name="graphClientId" placeholder="00000000-0000-0000-0000-000000000000" autocomplete="off" spellcheck="false"></label>
+        <label>Tenant <input name="graphTenant" placeholder="organizations" autocomplete="off" spellcheck="false">
+          <small>Directory (tenant) ID or domain. Use “organizations” for a multi-tenant app.</small></label>
+        <div class="graph-account">
+          <span id="graph-account" class="muted"></span>
+          <button type="button" id="btn-graph-signin" class="small">Save and sign in…</button>
+          <button type="button" id="btn-graph-signout" class="small" hidden>Sign out</button>
+        </div>
+      </div>
       <p class="muted small-text" id="perm-note"></p>
     </fieldset>
     <fieldset>

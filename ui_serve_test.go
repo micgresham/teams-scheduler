@@ -15,8 +15,12 @@ import (
 
 type demoAuto struct{}
 
-func (demoAuto) Status(string) (bool, string) { return true, "Teams desktop app" }
-func (demoAuto) Apply(string, *schedule.Presence) (string, error) {
+func (demoAuto) Status(string) (bool, string)      { return true, "Teams desktop app" }
+func (demoAuto) RefreshEvery(string) time.Duration { return 0 }
+func (demoAuto) GraphState() engine.GraphState     { return engine.GraphState{} }
+func (demoAuto) GraphSignIn(func()) error          { return nil }
+func (demoAuto) GraphSignOut()                     {}
+func (demoAuto) Apply(string, *schedule.Presence, time.Time) (string, error) {
 	return `pressed "Your profile" → pressed "Available, change status" → pressed "Busy"`, nil
 }
 func (demoAuto) Inspect(string) (string, error) { return "(demo)", nil }
@@ -47,7 +51,7 @@ func TestServeUI(t *testing.T) {
 	eng := engine.New(store, demoAuto{}, keepawake.New())
 	eng.Start()
 	defer eng.Shutdown()
-	srv := &http.Server{Addr: addr, Handler: newServer(store, eng)}
+	srv := &http.Server{Addr: addr, Handler: newServer(store, eng, demoAuto{})}
 	go srv.ListenAndServe()
 	time.Sleep(90 * time.Second)
 	srv.Close()

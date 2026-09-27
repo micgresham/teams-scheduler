@@ -57,7 +57,8 @@ func main() {
 	if err != nil {
 		log.Fatalf("config: %v", err)
 	}
-	eng := engine.New(store, engine.DefaultAutomator(), keepawake.New())
+	router := engine.NewRouter(store)
+	eng := engine.New(store, router, keepawake.New())
 
 	var window *application.WebviewWindow
 	showWindow := func() {
@@ -71,7 +72,7 @@ func main() {
 	app := application.New(application.Options{
 		Name:        "Teams Status Scheduler",
 		Description: "Sets your Microsoft Teams status from a schedule",
-		Assets:      application.AssetOptions{Handler: newServer(store, eng), DisableLogging: true},
+		Assets:      application.AssetOptions{Handler: newServer(store, eng, router), DisableLogging: true},
 		Mac: application.MacOptions{
 			ActivationPolicy: application.ActivationPolicyRegular,
 		},

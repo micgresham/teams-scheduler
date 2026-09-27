@@ -19,7 +19,7 @@ func newTestServer(t *testing.T) (*server, *config.Store) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return newServer(store, engine.New(store, demoAuto{}, keepawake.New())), store
+	return newServer(store, engine.New(store, demoAuto{}, keepawake.New()), demoAuto{}), store
 }
 
 func do(t *testing.T, s *server, method, path, body string) (int, map[string]any) {
@@ -84,5 +84,21 @@ func TestSettingsValidationAndPausePreserved(t *testing.T) {
 	st := store.Get().Settings
 	if code != 200 || st.Target != "browser" || st.KeepAwake != "always" || !st.Paused {
 		t.Fatalf("settings: %d %+v", code, st)
+	}
+}
+
+func TestGraphSettingsNeedClientID(t *testing.T) {
+	s, store := newTestServer(t)
+	code, out := do(t, s, "POST", "/api/settings", `{"target":"graph","checkIntervalSeconds":60,"keepAwake":"off"}`)
+	if code != 400 || !strings.Contains(out["error"].(string), "client) ID") {
+		t.Fatalf("got %d %v", code, out)
+	}
+	code, _ = do(t, s, "POST", "/api/settings", `{"target":"graph","graphClientId":" abc ","graphTenant":"","checkIntervalSeconds":60,"keepAwake":"off"}`)
+	st := store.Get().Settings
+	if code != 200 || st.GraphClientID != "abc" || st.GraphTenant != "organizations" {
+		t.Fatalf("got %d %+v", code, st)
+	}
+	if code, _ := do(t, s, "POST", "/api/settings", `{"target":"nope","checkIntervalSeconds":60}`); code != 400 {
+		t.Fatal("unknown method accepted")
 	}
 }

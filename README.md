@@ -4,10 +4,17 @@ A desktop app for macOS and Windows that sets your Microsoft Teams status
 from schedules you define, and can keep the computer awake. It's written in
 Go and ships as native compiled binaries.
 
-**No Microsoft Entra ID (Azure AD) app registration is needed.** The app
-changes your status by operating the Teams status menu, the same way you
-would: profile picture → *"Available, change status"* → *Busy*. It uses the
-operating system's accessibility interface to do this.
+There are three ways it can change your status:
+
+- **Teams desktop app** and **Teams web in a browser**: no Microsoft
+  Entra ID (Azure AD) app registration is needed. The app operates the
+  Teams status menu the same way you would: profile picture →
+  *"Available, change status"* → *Busy*. It uses the operating system's
+  accessibility interface to do this.
+- **Microsoft Graph**: uses Microsoft's official presence API through an
+  Entra ID app registration. There's no clicking and no Accessibility
+  permission, but someone must create the registration (see
+  [Using Microsoft Graph](#using-microsoft-graph-entra-id-app-registration)).
 
 This is **fair use ware**: free to use. If you find it useful, see
 [Fair use ware](#fair-use-ware).
@@ -23,12 +30,13 @@ This is **fair use ware**: free to use. If you find it useful, see
   vacations.
 - **Weekly timeline** that shows the final result after priorities are
   applied.
-- **Two ways to reach Teams:**
+- **Three ways to reach Teams:**
   - **The new Teams desktop app.** It can be minimised, hidden or have its
     window closed. The app brings it up in the background without stealing
     focus, then puts it back as it was.
   - **Teams web in a browser** (Chrome, Edge, Safari, Firefox, Arc, Brave, …).
     Keep teams.microsoft.com open as the active tab of a browser window.
+  - **Microsoft Graph**, with your own Entra ID app registration.
 - **Prevent sleep:** *Off*, *While a schedule is active*, or *Always, while
   the app is running*. This keeps SSH and other remote sessions from
   dropping. It is independent of the Teams side: your status keeps
@@ -61,7 +69,8 @@ This is **fair use ware**: free to use. If you find it useful, see
 1. Unzip, then drag **Teams Status Scheduler.app** to Applications.
 2. The app isn't notarized, so the first time you open it, right-click →
    **Open** → **Open**.
-3. Allow **Accessibility** access. Go to System Settings → Privacy &
+3. Allow **Accessibility** access. The Microsoft Graph method doesn't need
+   this. Go to System Settings → Privacy &
    Security → Accessibility and switch on **Teams Status Scheduler**. The
    app prompts for this, and the status panel shows *Grant access…* until
    it's allowed.
@@ -92,6 +101,81 @@ This is **fair use ware**: free to use. If you find it useful, see
 
 Then set up a schedule (Add schedule) and pick how to reach Teams (Settings →
 *Change status using*).
+
+## Using Microsoft Graph (Entra ID app registration)
+
+With this method the app calls Microsoft Graph's presence API as you. This
+is the same "preferred presence" you set by picking a status in Teams.
+
+### What you need
+
+- A **work or school** Microsoft 365 account. The presence API doesn't
+  support personal Microsoft accounts.
+- An **app registration** in your organisation's Microsoft Entra ID.
+  Creating one needs the right role. By default any member can create one,
+  but many organisations switch that off, and then only an administrator or
+  an *Application Developer* can.
+- **Consent** for two delegated permissions: `Presence.ReadWrite` and
+  `User.Read`. Neither normally needs an admin's approval. You approve them
+  yourself at first sign-in, unless your organisation has turned off user
+  consent. In that case an administrator must click **Grant admin
+  consent**.
+
+### Create the registration
+
+1. Sign in to https://entra.microsoft.com and go to **Identity →
+   Applications → App registrations → New registration**.
+   - **Name:** `Teams Status Scheduler` (any name works).
+   - **Supported account types:** *Accounts in this organizational
+     directory only* (single tenant).
+   - **Redirect URI:** choose **Public client/native (mobile & desktop)** and
+     enter `http://localhost`.
+2. On the app's **Overview** page, copy the **Application (client) ID** and
+   the **Directory (tenant) ID**.
+3. On **Authentication**, set **Allow public client flows** to **Yes** and
+   click Save. No client secret or certificate is needed: this is a
+   desktop app, and it signs in with PKCE.
+4. On **API permissions**:
+   - Choose **Add a permission → Microsoft Graph → Delegated permissions**.
+     Add **Presence.ReadWrite** (`User.Read` is usually there already).
+   - If your organisation requires it, click **Grant admin consent for
+     <your org>**. That button needs an administrator.
+
+### Connect the app
+
+1. Open **Settings → Change status using → Microsoft Graph (Entra ID app
+   registration)**.
+2. Paste the **Application (client) ID**. Under **Tenant**, enter the
+   **Directory (tenant) ID** or your domain (e.g. `contoso.com`).
+3. Click **Save and sign in…**. Your browser opens the normal Microsoft
+   sign-in page, including MFA. The first time, you're asked to approve the
+   permissions. Once you're signed in, the browser shows a "you can close
+   this window" message and the app shows *Signed in as …*.
+
+### How it behaves
+
+- **Statuses expire on their own.** Each status is sent with an expiry at
+  the end of its time block (plus two minutes). If the app stops running,
+  your status goes back to automatic instead of sticking. The app re-sends
+  the current status every 30 minutes, which keeps long blocks alive and
+  undoes a manual change within half an hour.
+- **Pausing, ending a schedule, and signing out** clear the preferred
+  presence, which hands control back to Teams.
+- **Sign-in is stored securely.** The app keeps its tokens in an encrypted
+  file in the data folder, so you normally sign in once. On macOS the
+  encryption key is in your Keychain; on Windows the file is protected with
+  DPAPI. Tokens are renewed automatically. If your organisation forces
+  re-authentication, the status panel shows **Sign in…**.
+
+### Common sign-in errors
+
+| Error | Fix |
+|---|---|
+| *AADSTS65001 / "Need admin approval"* | An administrator must click **Grant admin consent** on the API permissions page. |
+| *AADSTS7000218* | Turn on **Allow public client flows** (step 3). |
+| *AADSTS50011* (redirect URI mismatch) | Add `http://localhost` under **Mobile and desktop applications** (step 1). |
+| *AADSTS700016* (app not found) | Check the client ID, and that the tenant in Settings is the one the app is registered in. |
+| Graph 403 when setting status | `Presence.ReadWrite` is missing, or consent wasn't granted. |
 
 ## If a status change fails
 
@@ -173,7 +257,9 @@ main.go                  app setup: window, tray menu, single instance, signals
 server.go                local JSON API used by the UI (served only to the app's webview)
 frontend/                UI (plain HTML/CSS/JS, embedded in the binary)
 internal/schedule/       schedule model; which status wins now / next change
-internal/engine/         timer loop, apply-on-change, retry back-off, reset on exit
+internal/engine/         timer loop, apply-on-change, retry back-off, reset on exit;
+                         Router picks UI automation or Graph per the chosen method
+internal/graph/          Microsoft Graph: MSAL sign-in, presence calls, encrypted token cache
 internal/teams/          click recipe + drivers
   recipe.go              profile → "…, change status" → status; Inspect; label overrides
   driver_darwin.go       macOS Accessibility driver (+ ax_darwin.m, cgo)
@@ -191,20 +277,25 @@ makebin.sh               builds all four targets
 | Settings and schedules | `~/Library/Application Support/TeamsStatusScheduler/config.json` | `%AppData%\TeamsStatusScheduler\config.json` |
 | Log | same folder, `teams-status.log` | same folder |
 | UI label overrides | same folder, `ui_labels.json` | same folder |
+| Graph sign-in tokens | same folder, `graph-token-cache.bin` (AES-GCM; key in Keychain) | same folder (DPAPI) |
 
 ## Limitations
 
-- **Driving the UI is slower than an API.** A status change takes about 5
-  seconds. The app acts only when the scheduled status changes, and **Apply
+- **Driving the UI is slower than an API.** With the desktop and browser
+  methods a status change takes about 5 seconds. The app acts only when the scheduled status changes, and **Apply
   now** re-applies it. If you change your status by hand in Teams, the app
-  won't override it until the next scheduled change.
+  won't override it until the next scheduled change. (With Microsoft Graph,
+  the change is instant and re-sent every 30 minutes.)
 - **Teams can still show activity-based states.** Examples are "In a call"
   and "Presenting".
 - **macOS needs the Accessibility permission, which needs an
   administrator** to switch on. On a Mac where you're not an admin and IT
-  won't allow it, the app can't change your Teams status. Sleep prevention
-  and the scheduling still work. The app also can't use Microsoft Graph,
-  because that needs an Entra ID app registration.
+  won't allow it, the desktop and browser methods can't change your Teams
+  status. Use the Microsoft Graph method instead, if you can get an app
+  registration. Sleep prevention and the scheduling work either way.
+- **The Graph method hasn't been tested against a real tenant yet.** Its
+  requests and settings are unit-tested, and sign-in uses Microsoft's own
+  MSAL library.
 - **Windows builds are compiled but untested** on real hardware. The macOS
   build has been tested end to end against new Teams (2026).
 - **Schedules use the computer's local time zone.** A block from 00:00 to

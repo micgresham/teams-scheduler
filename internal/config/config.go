@@ -23,6 +23,7 @@ const AppName = "TeamsStatusScheduler"
 const (
 	TargetDesktop = "desktop" // the new Teams desktop app
 	TargetBrowser = "browser" // Teams web in a browser window
+	TargetGraph   = "graph"   // Microsoft Graph API (needs an Entra ID app registration)
 )
 
 // Keep-awake modes.
@@ -40,6 +41,8 @@ type Settings struct {
 	Paused               bool   `json:"paused"`
 	KeepAwake            string `json:"keepAwake"`
 	KeepDisplayAwake     bool   `json:"keepDisplayAwake"`
+	GraphClientID        string `json:"graphClientId"`
+	GraphTenant          string `json:"graphTenant"` // tenant ID/domain, or "organizations"
 }
 
 type Config struct {
@@ -73,6 +76,7 @@ func defaults() Config {
 			CheckIntervalSeconds: 60,
 			ResetOnExit:          true,
 			KeepAwake:            AwakeOff,
+			GraphTenant:          "organizations",
 		},
 		Schedules: []schedule.Schedule{{
 			ID: NewID(), Name: "Standard work week", Priority: 10, Enabled: false,

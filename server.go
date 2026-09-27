@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io/fs"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -27,11 +28,20 @@ var frontendFS embed.FS
 type server struct {
 	store *config.Store
 	eng   *engine.Engine
+	graph graphControl
 	mux   *http.ServeMux
 }
 
-func newServer(store *config.Store, eng *engine.Engine) *server {
-	s := &server{store: store, eng: eng, mux: http.NewServeMux()}
+// graphControl is the Microsoft Graph sign-in surface (engine.Router).
+type graphControl interface {
+	GraphState() engine.GraphState
+	GraphSignIn(done func()) error
+	GraphSignOut()
+	Apply(target string, p *schedule.Presence, until time.Time) (string, error)
+}
+
+func newServer(store *config.Store, eng *engine.Engine, g graphControl) *server {
+	s := &server{store: store, eng: eng, graph: g, mux: http.NewServeMux()}
 	static, _ := fs.Sub(frontendFS, "frontend")
 	s.mux.Handle("/", http.FileServer(http.FS(static)))
 	s.mux.HandleFunc("GET /api/state", s.state)
@@ -78,6 +88,7 @@ func (s *server) state(w http.ResponseWriter, r *http.Request) {
 		"settings":      cfg.Settings,
 		"schedules":     cfg.Schedules,
 		"launchAtLogin": autostart.Enabled(),
+		"graph":         s.graph.GraphState(),
 		"platform":      runtime.GOOS,
 		"presences":     presences,
 		"version":       version,
@@ -189,6 +200,21 @@ func (s *server) saveSettings(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
+	switch req.Target {
+	case config.TargetDesktop, config.TargetBrowser, config.TargetGraph:
+	default:
+		writeErr(w, errors.New("unknown method"))
+		return
+	}
+	req.GraphClientID = strings.TrimSpace(req.GraphClientID)
+	req.GraphTenant = strings.TrimSpace(req.GraphTenant)
+	if req.GraphTenant == "" {
+		req.GraphTenant = "organizations"
+	}
+	if req.Target == config.TargetGraph && req.GraphClientID == "" {
+		writeErr(w, errors.New("enter the app registration's Application (client) ID to use Microsoft Graph"))
+		return
+	}
 	if req.CheckIntervalSeconds < 15 || req.CheckIntervalSeconds > 600 {
 		writeErr(w, errors.New("check interval must be 15–600 seconds"))
 		return
@@ -236,6 +262,15 @@ func (s *server) action(w http.ResponseWriter, r *http.Request) {
 		if !teams.HasPermission(true) {
 			err = openAccessibilitySettings()
 		}
+		s.eng.ForceApply()
+	case "graphSignIn":
+		err = s.graph.GraphSignIn(s.eng.ForceApply)
+	case "graphSignOut":
+		// Hand Teams back to automatic first; that needs the token.
+		if _, clearErr := s.graph.Apply(config.TargetGraph, nil, time.Time{}); clearErr != nil {
+			log.Printf("clear presence before sign-out: %v", clearErr)
+		}
+		s.graph.GraphSignOut()
 		s.eng.ForceApply()
 	case "keepAwake":
 		err = s.eng.SetKeepAwake(req.Mode)
