@@ -213,6 +213,5 @@ makebin.sh               builds all four targets
 ## Fair use ware
 
 Teams Status Scheduler is **fair use ware**: you're free to use it. If you
-find it useful, buy me a cup of coffee at **Starbucks** or **7 Brew** and
-send it to my email, **micgresham@gmail.com**. You can send a gift card or
-an e-gift through the Starbucks or 7 Brew app. ☕
+find it useful, you can
+[buy me a coffee](https://buymeacoffee.com/micgresham). ☕
