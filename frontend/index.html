@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Teams Status Scheduler</title>
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<main>
+  <section class="card status" aria-labelledby="status-h">
+    <div class="card-head">
+      <h2 id="status-h">Status</h2>
+      <div class="head-actions">
+        <button id="btn-settings" class="ghost">Settings</button>
+      </div>
+    </div>
+    <dl class="status-grid">
+      <dt>Teams</dt>
+      <dd><span id="st-target"></span> <button id="btn-grant" class="small" hidden>Grant access…</button></dd>
+      <dt>Scheduled now</dt>
+      <dd><span id="st-dot" class="dot"></span><span id="st-current"></span></dd>
+      <dt>Next change</dt>
+      <dd id="st-next"></dd>
+      <dt>Last update</dt>
+      <dd id="st-last"></dd>
+      <dt>Prevent sleep</dt>
+      <dd>
+        <select id="st-awake" aria-label="Prevent sleep">
+          <option value="off">Off</option>
+          <option value="scheduled">While a schedule is active</option>
+          <option value="always">Always, while the app is running</option>
+        </select>
+        <span id="st-awake-state" class="muted"></span>
+      </dd>
+    </dl>
+    <div class="actions">
+      <button id="btn-pause">Pause</button>
+      <button id="btn-apply">Apply now</button>
+    </div>
+  </section>
+
+  <section class="card" aria-labelledby="sched-h">
+    <div class="card-head">
+      <h2 id="sched-h">Schedules</h2>
+      <span class="muted">Priority 1 wins when schedules overlap</span>
+      <div class="head-actions"><button id="btn-add" class="primary">Add schedule</button></div>
+    </div>
+    <div class="table-wrap">
+      <table id="sched-table">
+        <thead><tr><th>On</th><th>Priority</th><th>Name</th><th>Active dates</th><th>Time blocks</th><th></th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="card" aria-labelledby="week-h">
+    <div class="card-head">
+      <h2 id="week-h">This week</h2>
+      <span class="muted">Result after priorities — hover for details</span>
+    </div>
+    <div class="week-wrap"><canvas id="week" height="250"></canvas><div id="tip" class="tip" hidden></div></div>
+    <div id="legend" class="legend"></div>
+  </section>
+</main>
+
+<dialog id="dlg-schedule">
+  <form method="dialog" id="form-schedule">
+    <h2 id="sched-title">Edit schedule</h2>
+    <div class="form-grid">
+      <label>Name <input name="name" required maxlength="80"></label>
+      <label>Priority <input name="priority" type="number" min="1" max="99" required>
+        <small>1 = highest</small></label>
+      <label class="check"><input name="enabled" type="checkbox"> Enabled</label>
+    </div>
+    <fieldset class="dates">
+      <legend>Active dates <small>(optional)</small></legend>
+      <label>From <input name="validFrom" type="date"></label>
+      <label>Until <input name="validUntil" type="date"></label>
+    </fieldset>
+    <h3>Time blocks</h3>
+    <div class="table-wrap">
+      <table class="blocks">
+        <thead><tr><th>Mon</th><th>Tue</th><th>Wed</th><th>Thu</th><th>Fri</th><th>Sat</th><th>Sun</th><th>Start</th><th>End</th><th>Status</th><th></th></tr></thead>
+        <tbody id="blocks"></tbody>
+      </table>
+    </div>
+    <button type="button" id="btn-add-block" class="small">Add time block</button>
+    <p class="muted small-text">A block whose end is earlier than (or equal to) its start runs overnight into the next day. If blocks in the same schedule overlap, the first one listed wins.</p>
+    <p id="sched-error" class="error" hidden></p>
+    <div class="dialog-actions">
+      <button value="cancel" formnovalidate>Cancel</button>
+      <button id="btn-save-schedule" class="primary" value="save">Save</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="dlg-settings">
+  <form method="dialog" id="form-settings">
+    <h2>Settings</h2>
+    <fieldset>
+      <legend>Change status using</legend>
+      <label class="radio"><input type="radio" name="target" value="desktop"> Teams desktop app
+        <small>The new Teams app must be running and signed in. It can be minimised, hidden or have its window closed.</small></label>
+      <label class="radio"><input type="radio" name="target" value="browser"> Teams web in a browser
+        <small>Keep teams.microsoft.com open as the active tab of a browser window (Chrome, Edge, Safari, Firefox, …).</small></label>
+      <p class="muted small-text" id="perm-note"></p>
+    </fieldset>
+    <fieldset>
+      <legend>Behaviour</legend>
+      <label>Check schedule every <input name="checkIntervalSeconds" type="number" min="15" max="600"> seconds</label>
+      <label class="check"><input name="resetOnExit" type="checkbox"> Return Teams to automatic status when the app quits</label>
+      <label class="check"><input name="startHidden" type="checkbox"> Start with the window hidden</label>
+      <label class="check"><input name="launchAtLogin" type="checkbox"> Launch at login</label>
+    </fieldset>
+    <fieldset>
+      <legend>Prevent sleep</legend>
+      <select name="keepAwake">
+        <option value="off">Off</option>
+        <option value="scheduled">While a schedule is active</option>
+        <option value="always">Always, while the app is running</option>
+      </select>
+      <label class="check"><input name="keepDisplayAwake" type="checkbox"> Keep the display on as well</label>
+      <p class="muted small-text">Keeps SSH and other connections alive. Your Teams status follows your schedules either way. A MacBook still sleeps when its lid is closed, unless it's on power with an external display.</p>
+    </fieldset>
+    <fieldset>
+      <legend>Troubleshooting</legend>
+      <div class="row-buttons">
+        <button type="button" id="btn-inspect" class="small">Inspect Teams UI…</button>
+        <button type="button" id="btn-labels" class="small">Edit UI labels…</button>
+        <button type="button" id="btn-folder" class="small">Open data folder</button>
+      </div>
+    </fieldset>
+    <p id="settings-error" class="error" hidden></p>
+    <div class="dialog-actions">
+      <span class="muted small-text" id="version"></span>
+      <button value="cancel" formnovalidate>Cancel</button>
+      <button class="primary" value="save">Save</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="dlg-inspect">
+  <form method="dialog">
+    <h2>Teams UI inspection</h2>
+    <p class="muted small-text" id="inspect-note"></p>
+    <pre id="inspect-text"></pre>
+    <div class="dialog-actions"><button value="close" class="primary">Close</button></div>
+  </form>
+</dialog>
+
+<script src="app.js"></script>
+</body>
+</html>
