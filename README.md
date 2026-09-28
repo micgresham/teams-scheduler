@@ -89,6 +89,36 @@ This is **fair use ware**: free to use. If you find it useful, see
    - **Your Mac is managed by your company (MDM).** IT policy may block
      Accessibility access for apps it hasn't approved.
 
+**macOS without installing (plain executable)**
+
+The release also has plain executables (`…-macos-arm64` and
+`…-macos-x86_64`). They're the same app without the `.app` wrapper, and are
+useful for debugging, especially on a managed Mac:
+
+- Nothing is installed. Run it from any folder.
+- When you start it from a terminal, it uses **that terminal's
+  Accessibility permission**. If Terminal, iTerm or VS Code is already
+  allowed under Accessibility, no admin request is needed. New builds don't
+  need re-granting either.
+- Its log prints straight into the terminal.
+
+```bash
+cd ~/Downloads
+# Apple silicon (use …-macos-x86_64 on an Intel Mac)
+curl -LO https://github.com/micgresham/teams-scheduler/releases/latest/download/TeamsStatusScheduler-1.1.1-macos-arm64
+chmod +x TeamsStatusScheduler-1.1.1-macos-arm64
+./TeamsStatusScheduler-1.1.1-macos-arm64
+```
+
+Downloading with `curl` avoids the "unidentified developer" block. If you
+downloaded it with a browser instead, remove the quarantine flag first:
+`xattr -d com.apple.quarantine TeamsStatusScheduler-1.1.1-macos-arm64`.
+Neither step needs admin rights.
+
+The app runs as long as the terminal session does. Quit it from its
+menu-bar icon or press Ctrl-C; either way it resets Teams to automatic as
+usual. It uses the same settings and schedules as the `.app`.
+
 **Windows**
 
 1. Run the `.exe`. It's a single file, and no install is needed. Windows

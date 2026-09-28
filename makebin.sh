@@ -3,6 +3,8 @@
 #
 #   dist/TeamsStatusScheduler-<ver>-macos-arm64.zip    (Apple silicon .app)
 #   dist/TeamsStatusScheduler-<ver>-macos-x86_64.zip   (Intel .app)
+#   dist/TeamsStatusScheduler-<ver>-macos-arm64        (plain executable, for
+#   dist/TeamsStatusScheduler-<ver>-macos-x86_64        running from a terminal)
 #   dist/TeamsStatusScheduler-<ver>-windows-x64.exe
 #   dist/TeamsStatusScheduler-<ver>-windows-arm64.exe
 #
@@ -94,6 +96,13 @@ PLIST
   rm -f "$zip"
   ditto -c -k --keepParent "$app" "$zip"
   echo "   $zip"
+
+  # Plain executable: runs from a terminal without installing, and uses the
+  # terminal's Accessibility permission (handy for debugging on managed Macs).
+  local exe="dist/$EXE_NAME-$VERSION-macos-$arch"
+  cp "$app/Contents/MacOS/$EXE_NAME" "$exe"
+  codesign --force --sign "${CODESIGN_ID:--}" --identifier "$BUNDLE_ID" "$exe" >/dev/null 2>&1
+  echo "   $exe"
 }
 
 build_windows() { # $1 = x64 | arm64
