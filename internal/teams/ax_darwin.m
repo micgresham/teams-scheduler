@@ -79,6 +79,84 @@ static CFArrayRef copyWindows(int pid, const char *filter) {
 	return out;
 }
 
+// Roots to scan: the app's windows plus any other top-level children (pop-up
+// panels some Teams builds use for menus). With a title
+// filter (browser mode) only matching windows are used.
+static CFArrayRef copyRoots(int pid, const char *filter) {
+	CFMutableArrayRef out = CFArrayCreateMutable(NULL, 0, &kCFTypeArrayCallBacks);
+	CFArrayRef wins = copyWindows(pid, filter);
+	if (wins) { CFArrayAppendArray(out, wins, CFRangeMake(0, CFArrayGetCount(wins))); CFRelease(wins); }
+	if (filter && filter[0]) return out;
+	AXUIElementRef app = AXUIElementCreateApplication(pid);
+	CFTypeRef kids = copyAttr(app, kAXChildrenAttribute);
+	CFRelease(app);
+	if (kids && CFGetTypeID(kids) == CFArrayGetTypeID()) {
+		for (CFIndex i = 0; i < CFArrayGetCount(kids); i++) {
+			CFTypeRef k = CFArrayGetValueAtIndex(kids, i);
+			CFTypeRef role = copyAttr((AXUIElementRef)k, kAXRoleAttribute);
+			// Only window-like roots (pop-up panels); not the menu bar, and not the
+			// nested AXApplication element Teams' WebView exposes.
+			int windowLike = role && CFGetTypeID(role) == CFStringGetTypeID() &&
+				(CFEqual(role, kAXWindowRole) || CFEqual(role, kAXSheetRole) || CFEqual(role, kAXDrawerRole) ||
+				 CFEqual(role, CFSTR("AXPopover")));
+			if (role) CFRelease(role);
+			if (windowLike && !CFArrayContainsValue(out, CFRangeMake(0, CFArrayGetCount(out)), k)) CFArrayAppendValue(out, k);
+		}
+	}
+	if (kids) CFRelease(kids);
+	return out;
+}
+
+// One line per scan root: role/subrole and title (diagnostics).
+int tss_describe_roots(int pid, char *buf, int buflen) {
+	buf[0] = 0;
+	CFArrayRef roots = copyRoots(pid, NULL);
+	NSMutableArray *lines = [NSMutableArray array];
+	for (CFIndex i = 0; i < CFArrayGetCount(roots); i++) {
+		AXUIElementRef r = (AXUIElementRef)CFArrayGetValueAtIndex(roots, i);
+		NSString *role = (__bridge_transfer NSString *)copyAttr(r, kAXRoleAttribute);
+		NSString *sub = (__bridge_transfer NSString *)copyAttr(r, kAXSubroleAttribute);
+		CFTypeRef t = copyAttr(r, kAXTitleAttribute);
+		NSString *title = (t && CFGetTypeID(t) == CFStringGetTypeID()) ? (__bridge NSString *)t : @"";
+		[lines addObject:[NSString stringWithFormat:@"%@/%@ \"%@\"", role ?: @"?", sub ?: @"-", title]];
+		if (t) CFRelease(t);
+	}
+	CFRelease(roots);
+	strlcpy(buf, [[lines componentsJoinedByString:@"\n"] UTF8String], buflen);
+	return (int)lines.count;
+}
+
+// Alternative ways to activate a control when AXPress has no visible effect.
+int tss_focus_and_return(int pid, AXUIElementRef ref) {
+	AXUIElementSetAttributeValue(ref, kAXFocusedAttribute, kCFBooleanTrue);
+	usleep(150000);
+	for (int down = 1; down >= 0; down--) {
+		CGEventRef ev = CGEventCreateKeyboardEvent(NULL, 36 /* Return */, down);
+		CGEventPostToPid(pid, ev);
+		CFRelease(ev);
+	}
+	return 0;
+}
+
+int tss_click(int pid, AXUIElementRef ref) {
+	CFTypeRef posv = copyAttr(ref, kAXPositionAttribute), sizev = copyAttr(ref, kAXSizeAttribute);
+	CGPoint pos; CGSize size;
+	int ok = posv && sizev && AXValueGetValue(posv, kAXValueCGPointType, &pos) && AXValueGetValue(sizev, kAXValueCGSizeType, &size);
+	if (posv) CFRelease(posv);
+	if (sizev) CFRelease(sizev);
+	if (!ok) return -1;
+	CGPoint c = CGPointMake(pos.x + size.width / 2, pos.y + size.height / 2);
+	CGEventType types[2] = {kCGEventLeftMouseDown, kCGEventLeftMouseUp};
+	for (int i = 0; i < 2; i++) {
+		CGEventRef ev = CGEventCreateMouseEvent(NULL, types[i], c, kCGMouseButtonLeft);
+		CGEventSetIntegerValueField(ev, kCGMouseEventClickState, 1);
+		CGEventPostToPid(pid, ev);
+		CFRelease(ev);
+		usleep(60000);
+	}
+	return 0;
+}
+
 static int isMinimized(AXUIElementRef w) {
 	CFTypeRef v = copyAttr(w, kAXMinimizedAttribute);
 	int m = v && CFGetTypeID(v) == CFBooleanGetTypeID() && CFBooleanGetValue(v);
@@ -146,12 +224,21 @@ int tss_window_titles(int pid, char *buf, int buflen) {
 	return (int)titles.count;
 }
 
-// Ask Chromium-based apps to build their web accessibility tree.
-void tss_enable_ax(int pid) {
+// Ask Chromium-based apps to build their web accessibility tree. Teams'
+// WebView ignores AXManualAccessibility (the Chromium/Electron switch) but
+// honours AXEnhancedUserInterface (the VoiceOver one). Returns the previous
+// AXEnhancedUserInterface value.
+int tss_enable_ax(int pid) {
 	AXUIElementRef app = AXUIElementCreateApplication(pid);
+	CFTypeRef prev = copyAttr(app, CFSTR("AXEnhancedUserInterface"));
+	int was = prev && CFGetTypeID(prev) == CFBooleanGetTypeID() && CFBooleanGetValue(prev);
+	if (prev) CFRelease(prev);
 	AXUIElementSetAttributeValue(app, CFSTR("AXManualAccessibility"), kCFBooleanTrue);
+	AXUIElementSetAttributeValue(app, CFSTR("AXEnhancedUserInterface"), kCFBooleanTrue);
 	CFRelease(app);
+	return was;
 }
+
 
 static int roleCode(CFTypeRef role) {
 	if (!role || CFGetTypeID(role) != CFStringGetTypeID()) return 0;
@@ -170,10 +257,9 @@ static int isString(CFTypeRef v) { return v && CFGetTypeID(v) == CFStringGetType
 // Breadth-first walk of the matching windows, collecting actionable controls.
 int tss_collect(int pid, const char *filter, TSSItem *out, int maxOut, int maxNodes, double maxSeconds) {
 	@autoreleasepool {
-		CFArrayRef wins = copyWindows(pid, filter);
-		if (!wins) return 0;
-		CFMutableArrayRef queue = CFArrayCreateMutableCopy(NULL, 0, wins);
-		CFRelease(wins);
+		CFArrayRef roots = copyRoots(pid, filter);
+		CFMutableArrayRef queue = CFArrayCreateMutableCopy(NULL, 0, roots);
+		CFRelease(roots);
 		CFArrayRef attrs = (__bridge CFArrayRef)@[@"AXRole", @"AXTitle", @"AXDescription", @"AXValue", @"AXChildren"];
 		CFAbsoluteTime deadline = CFAbsoluteTimeGetCurrent() + maxSeconds;
 		int found = 0, seen = 0;
@@ -193,6 +279,11 @@ int tss_collect(int pid, const char *filter, TSSItem *out, int maxOut, int maxNo
 				}
 				out[found].ref = (AXUIElementRef)CFRetain(node);
 				out[found].role = code;
+				// Separate call: asking for AXHasPopup in the batch above makes the
+				// whole batch fail on some nodes.
+				CFTypeRef popup = copyAttr(node, CFSTR("AXHasPopup"));
+				out[found].hasPopup = popup && CFGetTypeID(popup) == CFBooleanGetTypeID() && CFBooleanGetValue(popup);
+				if (popup) CFRelease(popup);
 				out[found].name[0] = 0;
 				if (name) CFStringGetCString(name, out[found].name, sizeof(out[found].name), kCFStringEncodingUTF8);
 				found++;

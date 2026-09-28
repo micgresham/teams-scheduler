@@ -144,3 +144,55 @@ func contains(s, sub string) bool {
 	}
 	return false
 }
+
+// stubbornTeams ignores plain presses on the avatar (as seen in some work
+// tenants); only the second fallback (mouse click) opens the menu.
+type stubbornTeams struct {
+	fakeTeams
+	alts []string
+}
+
+func (s *stubbornTeams) Press(e Element) error {
+	if len(e.Name) > 12 && e.Name[:12] == "Your profile" {
+		s.presses = append(s.presses, "ignored:"+e.Name)
+		return nil
+	}
+	return s.fakeTeams.Press(e)
+}
+
+func (s *stubbornTeams) PressAlt(e Element, n int) (string, bool) {
+	switch n {
+	case 0:
+		s.alts = append(s.alts, "focus")
+		return "focus + Return key", true // no effect
+	case 1:
+		s.alts = append(s.alts, "click")
+		_ = s.fakeTeams.Press(e)
+		return "mouse click", true
+	}
+	return "", false
+}
+
+func TestFallbackPressOpensMenu(t *testing.T) {
+	f := &stubbornTeams{fakeTeams: fakeTeams{status: "Busy"}}
+	detail, err := Apply(f, p(schedule.DoNotDisturb), DefaultLabels())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f.status != "Do not disturb" || len(f.alts) != 2 || !contains(detail, "mouse click") {
+		t.Errorf("status %q alts %v detail %q", f.status, f.alts, detail)
+	}
+}
+
+// deadTeams never reacts: the error must say so rather than "not found".
+type deadTeams struct{ fakeTeams }
+
+func (d *deadTeams) Press(Element) error                  { return nil }
+func (d *deadTeams) PressAlt(Element, int) (string, bool) { return "", false }
+
+func TestNoEffectReported(t *testing.T) {
+	_, err := Apply(&deadTeams{}, p(schedule.Busy), DefaultLabels())
+	if err == nil || !contains(err.Error(), "no visible effect") {
+		t.Errorf("got %v", err)
+	}
+}

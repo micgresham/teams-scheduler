@@ -122,6 +122,8 @@ func Open(target string) (Driver, error) {
 	if filter != "" {
 		d.filter = C.CString(filter)
 	}
+	// Left on afterwards: turning it off makes Teams discard its accessibility
+	// tree, which then has to be rebuilt (slowly) for every change.
 	C.tss_enable_ax(d.pid)
 
 	if C.tss_is_hidden(d.pid) != 0 {
@@ -193,7 +195,7 @@ func (d *macDriver) Elements() []Element {
 	out := make([]Element, 0, n)
 	for i := 0; i < n; i++ {
 		name := strings.Join(strings.Fields(C.GoString(&items[i].name[0])), " ")
-		out = append(out, Element{Role: roleNames[items[i].role], Name: name, Native: items[i].ref})
+		out = append(out, Element{Role: roleNames[items[i].role], Name: name, HasPopup: items[i].hasPopup != 0, Native: items[i].ref})
 	}
 	return out
 }
@@ -212,6 +214,32 @@ func (d *macDriver) Press(e Element) error {
 	}
 	time.Sleep(600 * time.Millisecond)
 	return nil
+}
+
+// PressAlt tries fallback activation method n (0, 1, …) for a control whose
+// AXPress had no visible effect. It returns the method's name, or ok=false
+// when there are no more methods.
+func (d *macDriver) PressAlt(e Element, n int) (string, bool) {
+	ref := e.Native.(C.AXUIElementRef)
+	switch n {
+	case 0:
+		C.tss_focus_and_return(d.pid, ref)
+		time.Sleep(700 * time.Millisecond)
+		return "focus + Return key", true
+	case 1:
+		C.tss_click(d.pid, ref)
+		time.Sleep(700 * time.Millisecond)
+		return "mouse click", true
+	}
+	return "", false
+}
+
+// Describe lists the top-level elements scanned (diagnostics).
+func (d *macDriver) Describe() string {
+	buf := (*C.char)(C.malloc(8192))
+	defer C.free(unsafe.Pointer(buf))
+	C.tss_describe_roots(d.pid, buf, 8192)
+	return C.GoString(buf)
 }
 
 func (d *macDriver) Dismiss() {

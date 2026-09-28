@@ -6,6 +6,7 @@ enum { TSS_BUTTON = 1, TSS_MENUITEM, TSS_RADIO, TSS_CHECKBOX, TSS_LINK, TSS_LIST
 typedef struct {
 	AXUIElementRef ref; // retained; release with tss_release
 	int role;
+	int hasPopup; // aria-haspopup: opens a menu/submenu rather than being a choice
 	char name[512];
 } TSSItem;
 
@@ -24,8 +25,11 @@ void tss_set_minimized(AXUIElementRef window, int minimized);
 void tss_make_main(int pid, const char *filter);
 int tss_window_titles(int pid, char *buf, int buflen);
 
-void tss_enable_ax(int pid);
+int tss_enable_ax(int pid); // returns previous AXEnhancedUserInterface
 int tss_collect(int pid, const char *filter, TSSItem *out, int maxOut, int maxNodes, double maxSeconds);
 int tss_press(AXUIElementRef ref);
 void tss_release(AXUIElementRef ref);
 void tss_post_escape(int pid);
+int tss_describe_roots(int pid, char *buf, int buflen);
+int tss_focus_and_return(int pid, AXUIElementRef ref);
+int tss_click(int pid, AXUIElementRef ref);

@@ -21,9 +21,10 @@ import (
 
 // Element is a driver-neutral handle to a control.
 type Element struct {
-	Role   string // button, menuitem, listitem, radio, checkbox, link
-	Name   string
-	Native any
+	Role     string // button, menuitem, listitem, radio, checkbox, link
+	Name     string
+	HasPopup bool // opens a menu/submenu (e.g. the status opener), rather than being a choice
+	Native   any
 }
 
 // Driver exposes the controls of one Teams window.
@@ -136,6 +137,73 @@ func find(d Driver, q query, timeout time.Duration) (Element, bool) {
 	}
 }
 
+// Optional driver capabilities.
+type (
+	altPresser interface {
+		// PressAlt tries fallback activation method n; ok=false when out of methods.
+		PressAlt(e Element, n int) (method string, ok bool)
+	}
+	describer interface{ Describe() string }
+)
+
+// uiSignature summarises the visible controls, to detect whether a press did anything.
+func uiSignature(d Driver) string {
+	var b strings.Builder
+	for _, e := range d.Elements() {
+		b.WriteString(e.Role)
+		b.WriteString(e.Name)
+		b.WriteByte(0)
+	}
+	return b.String()
+}
+
+func waitForChange(d Driver, before string, timeout time.Duration) bool {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if uiSignature(d) != before {
+			return true
+		}
+		time.Sleep(300 * time.Millisecond)
+	}
+	return false
+}
+
+// pressAndConfirm presses e and checks the UI changed (a menu opened). If it
+// didn't, it tries the driver's fallback methods (re-finding the control with
+// refind before each). Returns how the press succeeded.
+func pressAndConfirm(d Driver, e Element, refind func() (Element, bool)) (string, error) {
+	before := uiSignature(d)
+	if err := d.Press(e); err != nil {
+		return "", err
+	}
+	if waitForChange(d, before, 2*time.Second) {
+		return "press", nil
+	}
+	ap, ok := d.(altPresser)
+	if !ok {
+		return "", fmt.Errorf("pressing %q had no visible effect", e.Name)
+	}
+	for n := 0; ; n++ {
+		el, found := refind()
+		if !found {
+			return "fallback", nil // the control went away: something happened
+		}
+		method, more := ap.PressAlt(el, n)
+		if !more {
+			break
+		}
+		if waitForChange(d, before, 2*time.Second) {
+			log.Printf("pressing %q needed fallback: %s", e.Name, method)
+			return method, nil
+		}
+	}
+	msg := fmt.Sprintf("pressing %q had no visible effect (tried press, focus + Return, mouse click)", e.Name)
+	if ds, ok := d.(describer); ok {
+		msg += "; Teams windows: " + strings.ReplaceAll(ds.Describe(), "\n", " | ")
+	}
+	return "", errors.New(msg)
+}
+
 // ErrNotFound is wrapped by errors about missing controls.
 var ErrNotFound = errors.New("control not found")
 
@@ -175,10 +243,11 @@ func Apply(d Driver, presence *schedule.Presence, labels Labels) (string, error)
 	if !ok {
 		return "", fmt.Errorf("%w: couldn't find the Teams profile picture button (try Inspect Teams UI)", ErrNotFound)
 	}
-	if err := d.Press(profile); err != nil {
+	how, err := pressAndConfirm(d, profile, func() (Element, bool) { return find(d, profileQ, time.Second) })
+	if err != nil {
 		return "", err
 	}
-	steps = append(steps, fmt.Sprintf("pressed %q", profile.Name))
+	steps = append(steps, fmt.Sprintf("pressed %q (%s)", profile.Name, how))
 	defer func() {
 		time.Sleep(400 * time.Millisecond)
 		closeMenus(d, labels)
@@ -194,10 +263,12 @@ func Apply(d Driver, presence *schedule.Presence, labels Labels) (string, error)
 		if !ok {
 			return "", fmt.Errorf("%w: opened the profile menu but couldn't find the status button", ErrNotFound)
 		}
-		if err := d.Press(opener); err != nil {
+		openerQ := query{patterns: compile(labels.StatusOpener), exclude: excl}
+		how, err := pressAndConfirm(d, opener, func() (Element, bool) { return find(d, openerQ, time.Second) })
+		if err != nil {
 			return "", err
 		}
-		steps = append(steps, fmt.Sprintf("pressed %q", opener.Name))
+		steps = append(steps, fmt.Sprintf("pressed %q (%s)", opener.Name, how))
 		if item, ok = find(d, targetQ, 4*time.Second); !ok {
 			excl2 := map[string]bool{profile.Name: true, opener.Name: true}
 			item, ok = find(d, query{patterns: compile(target), exclude: excl2}, time.Second)
@@ -221,25 +292,49 @@ func Inspect(d Driver, labels Labels) string {
 		fmt.Fprintf(&b, "== %s ==\n", title)
 		for _, e := range d.Elements() {
 			if e.Name != "" {
-				fmt.Fprintf(&b, "  [%s] %s\n", e.Role, e.Name)
+				popup := ""
+				if e.HasPopup {
+					popup = " ▸"
+				}
+				fmt.Fprintf(&b, "  [%s%s] %s\n", e.Role, popup, e.Name)
 			}
 		}
 		b.WriteString("\n")
 	}
+	profileQ := query{patterns: compile(labels.ProfileButton)}
+	if _, ok := find(d, profileQ, 2*time.Second); !ok {
+		closeMenus(d, labels) // a menu left open hides the rest of Teams
+	}
+	windows := func(title string) {
+		if ds, ok := d.(describer); ok {
+			fmt.Fprintf(&b, "== %s ==\n  %s\n\n", title, strings.ReplaceAll(ds.Describe(), "\n", "\n  "))
+		}
+	}
+	windows("Teams windows")
 	list("Controls visible now")
-	profile, ok := find(d, query{patterns: compile(labels.ProfileButton)}, 3*time.Second)
+	profile, ok := find(d, profileQ, 3*time.Second)
 	if !ok {
 		b.WriteString("(no control matched profileButton)\n")
 		return b.String()
 	}
-	_ = d.Press(profile)
-	time.Sleep(1500 * time.Millisecond)
-	list(fmt.Sprintf("After pressing profile button %q", profile.Name))
-	opener, ok := find(d, query{patterns: compile(labels.StatusOpener), exclude: map[string]bool{profile.Name: true}}, 2*time.Second)
+	how, err := pressAndConfirm(d, profile, func() (Element, bool) { return find(d, profileQ, time.Second) })
+	if err != nil {
+		fmt.Fprintf(&b, "(%v)\n\n", err)
+	} else {
+		time.Sleep(700 * time.Millisecond)
+	}
+	windows("Teams windows after pressing profile button")
+	list(fmt.Sprintf("After pressing profile button %q (%s)", profile.Name, how))
+	openerQ := query{patterns: compile(labels.StatusOpener), exclude: map[string]bool{profile.Name: true}}
+	opener, ok := find(d, openerQ, 2*time.Second)
 	if ok {
-		_ = d.Press(opener)
-		time.Sleep(1500 * time.Millisecond)
-		list(fmt.Sprintf("After pressing status button %q", opener.Name))
+		how, err := pressAndConfirm(d, opener, func() (Element, bool) { return find(d, openerQ, time.Second) })
+		if err != nil {
+			fmt.Fprintf(&b, "(%v)\n\n", err)
+		} else {
+			time.Sleep(700 * time.Millisecond)
+		}
+		list(fmt.Sprintf("After pressing status button %q (%s)", opener.Name, how))
 	} else {
 		b.WriteString("(no control matched statusOpener)\n")
 	}
